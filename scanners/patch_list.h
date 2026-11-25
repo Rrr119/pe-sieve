@@ -6,6 +6,8 @@
 
 #include <peconv.h>
 
+#include "injection_classifier.h"
+
 namespace pesieve {
 
 	typedef enum {
@@ -27,7 +29,8 @@ namespace pesieve {
 				type(pesieve::PATCH_UNKNOWN),
 				isDirect(true), 
 				hookTargetVA(0), hookTargetModule(0), isTargetSuspicious(false),
-				paddingVal(0)
+				paddingVal(0),
+				injectionContext(), injectionAssessment()
 			{
 			}
 
@@ -47,6 +50,8 @@ namespace pesieve {
 				isTargetSuspicious = other.isTargetSuspicious;
 				hookTargetModName = other.hookTargetModName;
 				paddingVal = other.paddingVal;
+				injectionContext = other.injectionContext;
+				injectionAssessment = other.injectionAssessment;
 			}
 
 			void setEnd(DWORD end_rva)
@@ -66,6 +71,46 @@ namespace pesieve {
 				return hookTargetVA;
 			}
 
+			void setInjectionContext(const PatchInjectionContext& context)
+			{
+				injectionContext = context;
+				injectionAssessment = classifyPatchInjection(injectionContext);
+			}
+
+			void setSourceAtFunctionEntry()
+			{
+				if (injectionContext.sourceAtFunctionEntry) {
+					return;
+				}
+				injectionContext.sourceAtFunctionEntry = true;
+				injectionAssessment = classifyPatchInjection(injectionContext);
+			}
+
+			void setTargetModuleInfo(ULONGLONG targetModuleBase, bool isSuspicious, const std::string& targetModuleName, bool resolved)
+			{
+				injectionContext.targetResolved = resolved;
+				injectionContext.targetModuleName = targetModuleName;
+				injectionContext.targetInNamedModule = resolved && !targetModuleName.empty();
+				injectionContext.targetInSuspiciousModule = resolved && isSuspicious;
+				injectionContext.targetSameModule = resolved && targetModuleBase == (ULONGLONG)moduleBase;
+				if (resolved && targetModuleBase) {
+					hookTargetModule = targetModuleBase;
+					isTargetSuspicious = isSuspicious;
+					hookTargetModName = targetModuleName;
+				}
+				injectionAssessment = classifyPatchInjection(injectionContext);
+			}
+
+			const InjectionAssessment& getInjectionAssessment() const
+			{
+				return injectionAssessment;
+			}
+
+			const PatchInjectionContext& getInjectionContext() const
+			{
+				return injectionContext;
+			}
+
 			bool setHookTargetInfo(ULONGLONG targetModuleBase, bool isSuspicious, std::string targetModuleName)
 			{
 				if (type == pesieve::PATCH_UNKNOWN || targetModuleBase == 0 || targetModuleBase > this->hookTargetVA) {
@@ -74,6 +119,7 @@ namespace pesieve {
 				this->hookTargetModule = targetModuleBase;
 				this->isTargetSuspicious = isSuspicious;
 				this->hookTargetModName = targetModuleName;
+				setTargetModuleInfo(targetModuleBase, isSuspicious, targetModuleName, true);
 				return true;
 			}
 
@@ -99,6 +145,9 @@ namespace pesieve {
 			ULONGLONG hookTargetModule;
 			bool isTargetSuspicious;
 			std::string hookTargetModName;
+
+			PatchInjectionContext injectionContext;
+			InjectionAssessment injectionAssessment;
 
 			friend class PatchList;
 			friend class PatchAnalyzer;

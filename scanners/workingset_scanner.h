@@ -8,6 +8,7 @@
 #include "module_scan_report.h"
 #include "mempage_data.h"
 #include "scan_report.h"
+#include "injection_classifier.h"
 
 #include "../utils/format_util.h"
 #include "../utils/workingset_enum.h"
@@ -89,9 +90,43 @@ namespace pesieve {
 				}
 			}
 #endif
+			if (injection.type != INJECTION_NONE || injection.verdict != INJECTION_VERDICT_UNKNOWN) {
+				outs << ",\n";
+				injection.toJSON(outs, level);
+			}
 		}
 
 		size_t generateTags(const std::string &reportPath);
+
+		void assessInjection()
+		{
+			injection.reset();
+			if (status != SCAN_SUSPICIOUS) {
+				return;
+			}
+			if (has_shellcode && !has_pe && !is_listed_module) {
+				injection.type = INJECTION_SHELLCODE_JUMP;
+				injection.verdict = INJECTION_VERDICT_INJECTED;
+				injection.confidence = 75;
+				injection.reason = "executable_shellcode_outside_named_modules";
+				injection.addEvidence("has_shellcode", "true");
+				if (all_matched_count) {
+					std::stringstream ss;
+					ss << std::dec << all_matched_count;
+					injection.addEvidence("shellcode_pattern_matches", ss.str());
+				}
+				std::stringstream protection_str;
+				protection_str << "0x" << std::hex << protection;
+				injection.addEvidence("protection", protection_str.str());
+			}
+			else if (has_pe) {
+				injection.type = INJECTION_UNKNOWN;
+				injection.verdict = INJECTION_VERDICT_SUSPICIOUS;
+				injection.confidence = 50;
+				injection.reason = "in_memory_pe_implant_outside_module_list";
+				injection.addEvidence("has_pe", "true");
+			}
+		}
 
 		bool is_executable;
 		bool is_listed_module;
@@ -109,6 +144,7 @@ namespace pesieve {
 		DWORD protection;
 		DWORD mapping_type;
 		std::string mapped_name; //if the region is mapped from a file
+		InjectionAssessment injection;
 
 	protected:
 		static std::string translate_mapping_type(DWORD type)

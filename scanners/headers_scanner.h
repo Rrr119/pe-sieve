@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include "module_scanner.h"
+#include "injection_classifier.h"
 
 namespace pesieve {
 
@@ -12,9 +13,12 @@ namespace pesieve {
 	public:
 		HeadersScanReport(HMODULE _module, size_t _moduleSize)
 			: ModuleScanReport(_module, _moduleSize),
+				epModified(false),
 			dosHdrModified(false), fileHdrModified(false), ntHdrModified(false),
 			secHdrModified(false),
-			epModified(false), archMismatch(false), is64(false)
+				archMismatch(false), is64(false), isInPEB(false),
+			expectedEntryPoint(0), actualEntryPoint(0),
+			injection()
 		{
 		}
 
@@ -51,6 +55,8 @@ namespace pesieve {
 				OUT_PADDED(outs, level, "\"is64b\" : ");
 				outs << is64;
 			}
+			outs << ",\n";
+			injection.toJSON(outs, level);
 		}
 
 		const virtual bool toJSON(std::stringstream& outs, size_t level, const pesieve::t_json_level &jdetails)
@@ -75,6 +81,11 @@ namespace pesieve {
 		bool archMismatch; // the loaded module is of different architecture than the module read from the corresponding path
 		DWORD is64; // is the remote module 64bit
 		bool isInPEB;
+
+		DWORD expectedEntryPoint;
+		DWORD actualEntryPoint;
+		std::vector<std::string> sectionDifferences;
+		InjectionAssessment injection;
 	};
 
 
@@ -90,7 +101,7 @@ namespace pesieve {
 
 	private:
 		bool zeroUnusedFields(PBYTE hdr_buffer, size_t hdrs_size);
-		bool isSecHdrModified(const PBYTE hdr_buffer1, const PBYTE hdr_buffer2, const size_t hdrs_size);
+		bool isSecHdrModified(const PBYTE hdr_buffer1, const PBYTE hdr_buffer2, const size_t hdrs_size, std::vector<std::string>* differences = nullptr);
 		bool isDosHdrModified(const PBYTE hdr_buffer1, const PBYTE hdr_buffer2, const size_t hdrs_size);
 		bool isFileHdrModified(const PBYTE hdr_buffer1, const PBYTE hdr_buffer2, const size_t hdrs_size, bool mask_arch_mismatch = false);
 		bool isNtHdrModified(const PBYTE hdr_buffer1, const PBYTE hdr_buffer2, const size_t hdrs_size);

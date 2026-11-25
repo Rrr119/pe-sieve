@@ -120,6 +120,7 @@ namespace pesieve {
 
 		size_t countHdrsReplaced() const;
 		bool hasAnyShownType(const t_results_filter &filter);
+		void injectionSummaryToJSON(std::stringstream& stream, size_t level) const;
 
 		DWORD pid;
 		bool is64bit;

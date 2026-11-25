@@ -364,5 +364,7 @@ WorkingSetScanReport* pesieve::WorkingSetScanner::scanRemote()
 	my_report->protection = memPage.protection;
 	my_report->mapping_type = memPage.mapping_type;
 	my_report->mapped_name = memPage.mapped_name;
+	my_report->is_listed_module = this->processReport.hasModule((ULONGLONG)my_report->module);
+	my_report->assessInjection();
 	return my_report;
 }

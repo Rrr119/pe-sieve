@@ -179,6 +179,76 @@ pesieve::t_report pesieve::ProcessScanReport::generateSummary() const
 	return summary;
 }
 
+void pesieve::ProcessScanReport::injectionSummaryToJSON(std::stringstream& stream, size_t level) const
+{
+	size_t module_replacement = 0;
+	size_t code_cave = 0;
+	size_t shellcode_jump = 0;
+	size_t hotpatch = 0;
+	size_t inline_hook = 0;
+	size_t unknown = 0;
+	size_t injected = 0;
+
+	for (const ModuleScanReport* report : reportsByType[REPORT_HEADERS_SCAN]) {
+		const HeadersScanReport* hdr_report = dynamic_cast<const HeadersScanReport*>(report);
+		if (!hdr_report) continue;
+		const InjectionAssessment& assessment = hdr_report->injection;
+		if (assessment.type == INJECTION_MODULE_REPLACEMENT) module_replacement++;
+		if (assessment.verdict == INJECTION_VERDICT_INJECTED && assessment.isInjection()) injected++;
+	}
+	for (const ModuleScanReport* report : reportsByType[REPORT_CODE_SCAN]) {
+		const CodeScanReport* code_report = dynamic_cast<const CodeScanReport*>(report);
+		if (!code_report) continue;
+		for (const PatchList::Patch* patch : code_report->patchesList.patches) {
+			if (!patch) continue;
+			const InjectionAssessment& assessment = patch->getInjectionAssessment();
+			switch (assessment.type) {
+			case INJECTION_MODULE_REPLACEMENT: module_replacement++; break;
+			case INJECTION_CODE_CAVE: code_cave++; break;
+			case INJECTION_SHELLCODE_JUMP: shellcode_jump++; break;
+			case INJECTION_HOTPATCH: hotpatch++; break;
+			case INJECTION_INLINE_HOOK: inline_hook++; break;
+			case INJECTION_UNKNOWN: unknown++; break;
+			default: break;
+			}
+			if (assessment.isInjection()) injected++;
+		}
+	}
+	for (const ModuleScanReport* report : reportsByType[REPORT_THREADS_SCAN]) {
+		const ThreadScanReport* thread_report = dynamic_cast<const ThreadScanReport*>(report);
+		if (!thread_report) continue;
+		if (thread_report->injection.type == INJECTION_SHELLCODE_JUMP) shellcode_jump++;
+		if (thread_report->injection.isInjection()) injected++;
+	}
+	for (const ModuleScanReport* report : reportsByType[REPORT_MEMPAGE_SCAN]) {
+		const WorkingSetScanReport* ws_report = dynamic_cast<const WorkingSetScanReport*>(report);
+		if (!ws_report) continue;
+		switch (ws_report->injection.type) {
+		case INJECTION_SHELLCODE_JUMP: shellcode_jump++; break;
+		case INJECTION_UNKNOWN: unknown++; break;
+		default: break;
+		}
+		if (ws_report->injection.isInjection()) injected++;
+	}
+
+	OUT_PADDED(stream, level, "\"injection\" : {\n");
+	OUT_PADDED(stream, level + 1, "\"module_replacement\" : ");
+	stream << std::dec << module_replacement << ",\n";
+	OUT_PADDED(stream, level + 1, "\"code_cave\" : ");
+	stream << std::dec << code_cave << ",\n";
+	OUT_PADDED(stream, level + 1, "\"shellcode_jump\" : ");
+	stream << std::dec << shellcode_jump << ",\n";
+	OUT_PADDED(stream, level + 1, "\"hotpatch\" : ");
+	stream << std::dec << hotpatch << ",\n";
+	OUT_PADDED(stream, level + 1, "\"inline_hook\" : ");
+	stream << std::dec << inline_hook << ",\n";
+	OUT_PADDED(stream, level + 1, "\"unknown\" : ");
+	stream << std::dec << unknown << ",\n";
+	OUT_PADDED(stream, level + 1, "\"injected\" : ");
+	stream << std::dec << injected << "\n";
+	OUT_PADDED(stream, level, "}");
+}
+
 std::string pesieve::ProcessScanReport::listModules(size_t level, const pesieve::t_results_filter &filter, const t_json_level &jdetails) const
 {
 	std::stringstream stream;
@@ -256,7 +326,9 @@ const bool pesieve::ProcessScanReport::toJSON(
 	OUT_PADDED(stream, level + 2, "\"unreachable_file\" : ");
 	stream << std::dec << report.unreachable_file << ",\n";
 	OUT_PADDED(stream, level + 2, "\"other\" : ");
-	stream << std::dec << other << "\n";
+	stream << std::dec << other << ",\n";
+	injectionSummaryToJSON(stream, level + 2);
+	stream << "\n";
 	OUT_PADDED(stream, level + 1, "},\n"); // modified
 	OUT_PADDED(stream, level + 1, "\"errors\" : ");
 	stream << std::dec << report.errors << "\n";

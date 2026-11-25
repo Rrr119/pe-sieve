@@ -60,3 +60,33 @@ Available also via:
 <hr/>
 
 logo by [Baran Pirinçal](https://github.com/baranpirincal)
+
+## Injection classification
+
+PE-sieve keeps the existing report fields and adds an `injection` assessment to suspicious code, module and thread
+findings. The classifier distinguishes:
+
+- `module_replacement` - the loaded PE section table no longer matches the file-backed image.
+- `code_cave` - executable bytes were written into padding or an expanded file-backed section.
+- `shellcode_jump` - a patch or thread flow leads outside all scanned named modules (or into a suspicious module).
+- `hotpatch` - a benign normal hotpatch: classic hotpatch slot, same-module entry detour, or a copied-prologue trampoline.
+- `inline_hook` / `unknown` - findings that are still suspicious but are not one of the injection types above.
+
+Each assessment contains `type`, `verdict` (`benign`, `suspicious` or `injected`), `confidence`, `reason` and an
+`evidence` array. Existing JSON keys are unchanged; new fields are additive. Patch details are emitted with
+`--jlvl 2`, while aggregate counts are available in basic JSON:
+
+```json
+"injection": {
+  "module_replacement": 0,
+  "code_cave": 1,
+  "shellcode_jump": 1,
+  "hotpatch": 2,
+  "inline_hook": 0,
+  "unknown": 0,
+  "injected": 2
+}
+```
+
+The deterministic regression corpus under `tests/` contains 100 manually labelled samples and checks that normal
+hotpatches are classified as `benign` rather than as injections. See `tests/README.md` for the test command.

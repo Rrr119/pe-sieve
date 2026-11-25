@@ -335,6 +335,7 @@ size_t pesieve::ProcessScanner::scanWorkingSet(ProcessScanReport &pReport) //thr
 		{
 			my_report->status = SCAN_NOT_SUSPICIOUS;
 		}
+		my_report->assessInjection();
 
 		pReport.appendReport(my_report);
 	}

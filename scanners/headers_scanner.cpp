@@ -34,6 +34,8 @@ HeadersScanReport* pesieve::HeadersScanner::scanRemote()
 	// some .NET modules overwrite their own headers, so at this point they should be excluded from the comparison
 	const DWORD ep1 = peconv::get_entry_point_rva(hdr_buffer1);
 	const DWORD ep2 = peconv::get_entry_point_rva(hdr_buffer2);
+	my_report->actualEntryPoint = ep1;
+	my_report->expectedEntryPoint = ep2;
 	if (ep1 != ep2) {
 		my_report->epModified = true;
 	}
@@ -55,13 +57,25 @@ HeadersScanReport* pesieve::HeadersScanner::scanRemote()
 	//compare:
 	if (memcmp(hdr_buffer1, hdr_buffer2, hdrs_size) == 0) {
 		my_report->status = SCAN_NOT_SUSPICIOUS;
+		HeaderInjectionContext injectionContext;
+		my_report->injection = classifyModuleInjection(injectionContext);
 		return my_report;
 	}
 	//modifications detected, now find more details:
 	my_report->dosHdrModified = isDosHdrModified(hdr_buffer1, hdr_buffer2, hdrs_size);
 	my_report->fileHdrModified = isFileHdrModified(hdr_buffer1, hdr_buffer2, hdrs_size);
 	my_report->ntHdrModified = isNtHdrModified(hdr_buffer1, hdr_buffer2, hdrs_size);
-	my_report->secHdrModified = isSecHdrModified(hdr_buffer1, hdr_buffer2, hdrs_size);
+	my_report->secHdrModified = isSecHdrModified(hdr_buffer1, hdr_buffer2, hdrs_size, &my_report->sectionDifferences);
+
+	HeaderInjectionContext injectionContext;
+	injectionContext.sectionTableModified = my_report->isHdrReplaced();
+	injectionContext.entryPointModified = my_report->epModified;
+	injectionContext.ntHeadersModified = my_report->ntHdrModified;
+	injectionContext.fileHeadersModified = my_report->fileHdrModified;
+	injectionContext.dosHeaderModified = my_report->dosHdrModified;
+	injectionContext.architectureMismatch = my_report->archMismatch;
+	injectionContext.sectionDifferences = my_report->sectionDifferences;
+	my_report->injection = classifyModuleInjection(injectionContext);
 
 	if (moduleData.isDotNet()) {
 		const bool dotNetFileHdrModif = isFileHdrModified(hdr_buffer1, hdr_buffer2, hdrs_size, my_report->archMismatch);
@@ -79,6 +93,11 @@ HeadersScanReport* pesieve::HeadersScanner::scanRemote()
 			std::cout << "[#] Filtered out modifications typical for .NET files, setting as not suspicious\n";
 #endif
 			my_report->status = SCAN_NOT_SUSPICIOUS;
+			my_report->injection.reset();
+			my_report->injection.type = INJECTION_NONE;
+			my_report->injection.verdict = INJECTION_VERDICT_BENIGN;
+			my_report->injection.confidence = 90;
+			my_report->injection.reason = "dotnet_header_changes_filtered";
 			return my_report;
 		}
 	}
@@ -121,14 +140,20 @@ bool pesieve::HeadersScanner::isDosHdrModified(const PBYTE hdr_buffer1, const PB
 	return false;
 }
 
-bool pesieve::HeadersScanner::isSecHdrModified(const PBYTE hdr_buffer1, const PBYTE hdr_buffer2, const size_t hdrs_size)
+bool pesieve::HeadersScanner::isSecHdrModified(const PBYTE hdr_buffer1, const PBYTE hdr_buffer2, const size_t hdrs_size, std::vector<std::string>* differences)
 {
 	size_t section_num1 = peconv::get_sections_count(hdr_buffer1, hdrs_size);
 	size_t section_num2 = peconv::get_sections_count(hdr_buffer2, hdrs_size);
 	if (section_num1 != section_num2) {
+		if (differences) {
+			std::stringstream ss;
+			ss << "section_count expected=" << std::dec << section_num2 << " actual=" << section_num1;
+			differences->push_back(ss.str());
+		}
 		return true;
 	}
 
+	bool modified = false;
 	for (size_t i = 0; i < section_num1; i++) {
 		PIMAGE_SECTION_HEADER sec_hdr1 = peconv::get_section_hdr(hdr_buffer1, hdrs_size, i);
 		PIMAGE_SECTION_HEADER sec_hdr2 = peconv::get_section_hdr(hdr_buffer2, hdrs_size, i);
@@ -136,20 +161,75 @@ bool pesieve::HeadersScanner::isSecHdrModified(const PBYTE hdr_buffer1, const PB
 			continue;
 		}
 		else if (!sec_hdr1 || !sec_hdr2) {
-			return true; //modified
+			if (differences) {
+				std::stringstream ss;
+				ss << "section[" << std::dec << i << "] missing in one of the images";
+				differences->push_back(ss.str());
+			}
+			modified = true;
+			continue;
 		}
 
+		const size_t name_len = strnlen((const char*)sec_hdr1->Name, IMAGE_SIZEOF_SHORT_NAME);
+		const std::string section_name((const char*)sec_hdr1->Name, name_len);
+		const size_t name_len2 = strnlen((const char*)sec_hdr2->Name, IMAGE_SIZEOF_SHORT_NAME);
+		const std::string section_name2((const char*)sec_hdr2->Name, name_len2);
+		if (section_name != section_name2) {
+			if (differences) {
+				std::stringstream ss;
+				ss << "section[" << std::dec << i << "] name expected=" << section_name2
+					<< " actual=" << section_name;
+				differences->push_back(ss.str());
+			}
+			modified = true;
+		}
 		if (sec_hdr1->VirtualAddress != sec_hdr2->VirtualAddress) {
-			return true;
+			if (differences) {
+				std::stringstream ss;
+				ss << "section[" << std::dec << i << ":" << section_name << "] VirtualAddress expected=0x"
+					<< std::hex << sec_hdr2->VirtualAddress << " actual=0x" << sec_hdr1->VirtualAddress;
+				differences->push_back(ss.str());
+			}
+			modified = true;
 		}
 		if (sec_hdr1->Misc.VirtualSize != sec_hdr2->Misc.VirtualSize) {
-			return true;
+			if (differences) {
+				std::stringstream ss;
+				ss << "section[" << std::dec << i << ":" << section_name << "] VirtualSize expected=0x"
+					<< std::hex << sec_hdr2->Misc.VirtualSize << " actual=0x" << sec_hdr1->Misc.VirtualSize;
+				differences->push_back(ss.str());
+			}
+			modified = true;
+		}
+		if (sec_hdr1->SizeOfRawData != sec_hdr2->SizeOfRawData) {
+			if (differences) {
+				std::stringstream ss;
+				ss << "section[" << std::dec << i << ":" << section_name << "] SizeOfRawData expected=0x"
+					<< std::hex << sec_hdr2->SizeOfRawData << " actual=0x" << sec_hdr1->SizeOfRawData;
+				differences->push_back(ss.str());
+			}
+			modified = true;
 		}
 		if (sec_hdr1->PointerToRawData != sec_hdr2->PointerToRawData) {
-			return true;
+			if (differences) {
+				std::stringstream ss;
+				ss << "section[" << std::dec << i << ":" << section_name << "] PointerToRawData expected=0x"
+					<< std::hex << sec_hdr2->PointerToRawData << " actual=0x" << sec_hdr1->PointerToRawData;
+				differences->push_back(ss.str());
+			}
+			modified = true;
+		}
+		if (sec_hdr1->Characteristics != sec_hdr2->Characteristics) {
+			if (differences) {
+				std::stringstream ss;
+				ss << "section[" << std::dec << i << ":" << section_name << "] Characteristics expected=0x"
+					<< std::hex << sec_hdr2->Characteristics << " actual=0x" << sec_hdr1->Characteristics;
+				differences->push_back(ss.str());
+			}
+			modified = true;
 		}
 	}
-	return false;
+	return modified;
 }
 
 bool pesieve::HeadersScanner::isFileHdrModified(const PBYTE hdr_buffer1, const PBYTE hdr_buffer2, const size_t hdrs_size, bool mask_arch_mismatch)

@@ -87,6 +87,12 @@ const bool pesieve::PatchList::Patch::toJSON(std::stringstream &outs, size_t lev
 		outs << ",\n";
 		OUT_PADDED(outs, (level + 1), "\"info\" : ");
 		outs << "\"" << getFormattedName() << "\"";
+		outs << ",\n";
+		OUT_PADDED(outs, (level + 1), "\"injection_type\" : ");
+		outs << "\"" << injection_type_to_id(injectionAssessment.type) << "\"";
+		outs << ",\n";
+		OUT_PADDED(outs, (level + 1), "\"verdict\" : ");
+		outs << "\"" << injection_verdict_to_id(injectionAssessment.verdict) << "\"";
 	}
 	else {
 		outs << ",\n";
@@ -114,6 +120,8 @@ const bool pesieve::PatchList::Patch::toJSON(std::stringstream &outs, size_t lev
 			outs << std::dec << (ULONGLONG)this->isTargetSuspicious << "\n";
 			OUT_PADDED(outs, (level + 1), "}");
 		}
+		outs << ",\n";
+		injectionAssessment.toJSON(outs, level + 1);
 	}
 
 	outs << "\n";
@@ -172,6 +180,7 @@ size_t  pesieve::PatchList::checkForHookedExports(peconv::ExportsMapper &expMap)
 		Patch *patch = *itr;
 		if (patch->resolveHookedExport(expMap)) {
 			hookes_exports++;
+			patch->setSourceAtFunctionEntry();
 		}
 	}
 	return hookes_exports;

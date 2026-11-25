@@ -834,6 +834,38 @@ bool pesieve::ThreadScanner::assessIndicators(ThreadScanReport& my_report)
 	return true;
 }
 
+void pesieve::ThreadScanner::assessInjection(ThreadScanReport& my_report)
+{
+	if (my_report.status != SCAN_SUSPICIOUS) {
+		my_report.injection.reset();
+		return;
+	}
+
+	const bool startOutside = my_report.indicators.find(THI_SUS_START) != my_report.indicators.end();
+	const bool ipOutside = my_report.indicators.find(THI_SUS_IP) != my_report.indicators.end();
+	const bool stackOutside = my_report.indicators.find(THI_SUS_CALLSTACK_SHC) != my_report.indicators.end();
+	const bool returnOutside = my_report.indicators.find(THI_SUS_RET) != my_report.indicators.end();
+
+	if (!startOutside && !ipOutside && !stackOutside && !returnOutside) {
+		my_report.injection = classifyThreadInjection(false, false, false);
+		return;
+	}
+	my_report.injection = classifyThreadInjection(ipOutside || startOutside, stackOutside, returnOutside);
+	if (startOutside) {
+		my_report.injection.addEvidence("thread_start_outside_module", "true",
+			"the thread start address is not backed by a named module");
+	}
+	if (!my_report.suspAreaReports.empty()) {
+		const auto first = my_report.suspAreaReports.begin();
+		const SuspAddrReport* area = first->second;
+		if (area && area->module) {
+			std::stringstream ss;
+			ss << "0x" << std::hex << area->module;
+			my_report.injection.addEvidence("suspicious_area", ss.str());
+		}
+	}
+}
+
 void pesieve::ThreadScanner::initReport(ThreadScanReport& my_report)
 {
 	if (!this->info.is_extended) {
@@ -901,6 +933,7 @@ ThreadScanReport* pesieve::ThreadScanner::scanRemote()
 		}
 	}
 	assessIndicators(*my_report);
+	assessInjection(*my_report);
 	reportResolvedCallstack(*my_report);
 	return my_report;
 }

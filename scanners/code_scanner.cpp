@@ -6,6 +6,8 @@
 #include "../utils/artefacts_util.h"
 //---
 #include <iostream>
+#include <iomanip>
+#include <sstream>
 
 using namespace pesieve;
 using namespace pesieve::util;
@@ -128,7 +130,7 @@ bool pesieve::CodeScanner::clearExports(PeSection &originalSec, PeSection &remot
 
 size_t pesieve::CodeScanner::collectPatches(DWORD section_rva, PBYTE orig_code, PBYTE patched_code, size_t code_size, OUT PatchList &patchesList)
 {
-	PatchAnalyzer analyzer(moduleData, section_rva, patched_code, code_size);
+	PatchAnalyzer analyzer(moduleData, section_rva, orig_code, patched_code, code_size);
 	PatchList::Patch *currPatch = nullptr;
 
 	for (DWORD i = 0; i < (DWORD) code_size; i++) {
@@ -174,6 +176,16 @@ namespace pesieve {
 		}
 		return nullptr;
 	}
+
+	inline std::string bytes_to_hex(const BYTE* data, size_t size)
+	{
+		std::stringstream ss;
+		for (size_t i = 0; i < size; i++) {
+			if (i) ss << " ";
+			ss << std::hex << std::setw(2) << std::setfill('0') << (unsigned int)data[i];
+		}
+		return ss.str();
+	}
 };
 
 CodeScanReport::t_section_status pesieve::CodeScanner::scanSection(PeSection &originalSec, PeSection &remoteSec, OUT PatchList &patchesList)
@@ -200,6 +212,9 @@ CodeScanReport::t_section_status pesieve::CodeScanner::scanSection(PeSection &or
 	if ((originalSec.rawSize == 0 || peconv::is_padding(originalSec.loadedSection, smaller_size, 0))
 		&& !peconv::is_padding(remoteSec.loadedSection, smaller_size, 0))
 	{
+		// Keep the patch evidence: an originally empty section filled with code is
+		// classified as a code cave rather than an undifferentiated "unpacked" section.
+		collectPatches(originalSec.rva, originalSec.loadedSection, remoteSec.loadedSection, smaller_size, patchesList);
 		return pesieve::CodeScanReport::SECTION_UNPACKED; // modified
 	}
 
@@ -219,6 +234,17 @@ CodeScanReport::t_section_status pesieve::CodeScanner::scanSection(PeSection &or
 			PatchList::Patch* currPatch = new(std::nothrow) PatchList::Patch(moduleData.moduleHandle, patchesList.size(), found_rva);
 			if (currPatch) {
 				currPatch->setEnd(MASK_TO_DWORD(remoteSec.rva + remoteSec.loadedSize));
+				PatchInjectionContext context;
+				context.sourceVa = moduleData.rvaToVa(found_rva);
+				context.patchRva = found_rva;
+				context.instructionRva = found_rva;
+				context.patchSize = MASK_TO_DWORD(remoteSec.rva + remoteSec.loadedSize) - found_rva;
+				context.moduleName = moduleData.szModName;
+				context.sourceWasPadding = true;
+				context.sectionExpanded = true;
+				const size_t evidenceSize = context.patchSize < 8 ? context.patchSize : 8;
+				context.currentBytes = bytes_to_hex(not_padding, evidenceSize);
+				currPatch->setInjectionContext(context);
 				patchesList.insert(currPatch);
 			}
 		}
@@ -389,6 +415,7 @@ pesieve::CodeScanReport* pesieve::CodeScanner::scanRemote()
 	postProcessScan(*my_report);
 
 	my_report->status = last_res;
+	refineStatusFromInjection(*my_report);
 	return my_report; // last result
 }
 
@@ -402,4 +429,35 @@ bool pesieve::CodeScanner::postProcessScan(IN OUT CodeScanReport &report)
 	local_mapper.add_to_lookup(moduleData.szModName, (HMODULE) moduleData.original_module, (ULONGLONG) moduleData.moduleHandle);
 	report.patchesList.checkForHookedExports(local_mapper);
 	return true;
+}
+
+bool pesieve::CodeScanner::hasOnlyBenignPatches(const PatchList& patchesList) const
+{
+	if (patchesList.patches.empty()) {
+		return false;
+	}
+	for (auto itr = patchesList.patches.begin(); itr != patchesList.patches.end(); ++itr) {
+		const PatchList::Patch* patch = *itr;
+		if (!patch) {
+			return false;
+		}
+		const InjectionAssessment& assessment = patch->getInjectionAssessment();
+		if (assessment.verdict != INJECTION_VERDICT_BENIGN) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void pesieve::CodeScanner::refineStatusFromInjection(IN OUT CodeScanReport& report) const
+{
+	if (report.status != SCAN_SUSPICIOUS) {
+		return;
+	}
+	if (report.countUnpackedSections() > 0 || report.countInaccessibleSections() > 0) {
+		return;
+	}
+	if (hasOnlyBenignPatches(report.patchesList)) {
+		report.status = SCAN_NOT_SUSPICIOUS;
+	}
 }

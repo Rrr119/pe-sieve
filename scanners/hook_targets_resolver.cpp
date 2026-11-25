@@ -12,7 +12,11 @@ bool pesieve::HookTargetResolver::resolveTarget(PatchList::Patch* currPatch)
 
 	const ULONGLONG searchedAddr = currPatch->getHookTargetVA();
 	const ScannedModule* foundMod = processReport.getModuleContaining(searchedAddr);
-	if (!foundMod) return false;
+	if (!foundMod) {
+		// The target is not backed by any scanned module (private/reflective memory).
+		currPatch->setTargetModuleInfo(0, false, "", true);
+		return false;
+	}
 
 	if (processReport.exportsMap) {
 		const peconv::ExportedFunc* expFunc = processReport.exportsMap->find_export_by_va(searchedAddr);
@@ -22,7 +26,10 @@ bool pesieve::HookTargetResolver::resolveTarget(PatchList::Patch* currPatch)
 			return true;
 		}
 	}
-	currPatch->setHookTargetInfo(foundMod->getStart(), foundMod->isSuspicious(), foundMod->getModName());
+	const bool is_resolved = currPatch->setHookTargetInfo(foundMod->getStart(), foundMod->isSuspicious(), foundMod->getModName());
+	if (!is_resolved) {
+		currPatch->setTargetModuleInfo(foundMod->getStart(), foundMod->isSuspicious(), foundMod->getModName(), true);
+	}
 	return true;
 }
 

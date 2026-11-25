@@ -7,6 +7,7 @@
 #include "../utils/process_symbols.h"
 #include "../stats/stats.h"
 #include "../stats/entropy_stats.h"
+#include "injection_classifier.h"
 #include <vector>
 
 namespace pesieve {
@@ -341,6 +342,11 @@ namespace pesieve {
 			outs << ",\n";
 			indicatorsToJSON(outs, level, jdetails);
 
+			if (injection.type != INJECTION_NONE || injection.verdict != INJECTION_VERDICT_UNKNOWN) {
+				outs << ",\n";
+				injection.toJSON(outs, level);
+			}
+
 			if (!suspAreaReports.empty()) {
 				outs << ",\n";
 				OUT_PADDED(outs, level, "\"susp_areas\" : [\n");
@@ -395,6 +401,7 @@ namespace pesieve {
 		std::set<ULONGLONG> shcCandidates;
 		std::set<ThSusIndicator> indicators;
 		std::map<ULONGLONG, SuspAddrReport*> suspAreaReports;
+		InjectionAssessment injection;
 	};
 
 	//!  A scanner for threads
@@ -438,6 +445,7 @@ namespace pesieve {
 
 		// Assigns the final verdict basing on collected indicators. Returns true if the report was modified.
 		bool assessIndicators(ThreadScanReport& my_report);
+		void assessInjection(ThreadScanReport& my_report);
 
 		bool isReflection;
 		bool isManaged;

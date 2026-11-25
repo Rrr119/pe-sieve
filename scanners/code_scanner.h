@@ -64,6 +64,9 @@ namespace pesieve {
 				OUT_PADDED(outs, level, "\"patches\" : ");
 				outs << std::dec << patchesList.size();
 
+				outs << ",\n";
+				injectionSummaryToJSON(outs, level);
+
 				if (jdetails >= JSON_DETAILS) {
 					outs << ",\n";
 					const bool is_short = (jdetails < JSON_DETAILS2) ? true : false;
@@ -96,6 +99,52 @@ namespace pesieve {
 			return countSectionsWithStatus(SECTION_SCAN_ERR);
 		}
 
+		size_t countInjectionType(const t_injection_type type) const
+		{
+			size_t count = 0;
+			for (auto itr = patchesList.patches.begin(); itr != patchesList.patches.end(); ++itr) {
+				const PatchList::Patch* patch = *itr;
+				if (patch && patch->getInjectionAssessment().type == type) {
+					count++;
+				}
+			}
+			return count;
+		}
+
+		size_t countInjectionVerdict(const t_injection_verdict verdict) const
+		{
+			size_t count = 0;
+			for (auto itr = patchesList.patches.begin(); itr != patchesList.patches.end(); ++itr) {
+				const PatchList::Patch* patch = *itr;
+				if (patch && patch->getInjectionAssessment().verdict == verdict) {
+					count++;
+				}
+			}
+			return count;
+		}
+
+		void injectionSummaryToJSON(std::stringstream& outs, size_t level) const
+		{
+			OUT_PADDED(outs, level, "\"injection_summary\" : {\n");
+			OUT_PADDED(outs, level + 1, "\"code_cave\" : ");
+			outs << std::dec << countInjectionType(INJECTION_CODE_CAVE) << ",\n";
+			OUT_PADDED(outs, level + 1, "\"shellcode_jump\" : ");
+			outs << std::dec << countInjectionType(INJECTION_SHELLCODE_JUMP) << ",\n";
+			OUT_PADDED(outs, level + 1, "\"module_replacement\" : ");
+			outs << std::dec << countInjectionType(INJECTION_MODULE_REPLACEMENT) << ",\n";
+			OUT_PADDED(outs, level + 1, "\"inline_hook\" : ");
+			outs << std::dec << countInjectionType(INJECTION_INLINE_HOOK) << ",\n";
+			OUT_PADDED(outs, level + 1, "\"hotpatch\" : ");
+			outs << std::dec << countInjectionType(INJECTION_HOTPATCH) << ",\n";
+			OUT_PADDED(outs, level + 1, "\"unknown\" : ");
+			outs << std::dec << countInjectionType(INJECTION_UNKNOWN) << ",\n";
+			OUT_PADDED(outs, level + 1, "\"injected\" : ");
+			outs << std::dec << countInjectionVerdict(INJECTION_VERDICT_INJECTED) << ",\n";
+			OUT_PADDED(outs, level + 1, "\"benign\" : ");
+			outs << std::dec << countInjectionVerdict(INJECTION_VERDICT_BENIGN) << "\n";
+			OUT_PADDED(outs, level, "}");
+		}
+
 		size_t generateTags(const std::string &reportPath);
 
 		std::map<DWORD, t_section_status> sectionToResult;
@@ -125,6 +174,8 @@ namespace pesieve {
 		void freeExecutableSections(std::map<size_t, PeSection*> &sections);
 
 		bool postProcessScan(IN OUT CodeScanReport &report);
+		bool hasOnlyBenignPatches(const PatchList& patchesList) const;
+		void refineStatusFromInjection(IN OUT CodeScanReport& report) const;
 
 		t_scan_status scanUsingBase(IN ULONGLONG load_base, IN std::map<size_t, PeSection*> &remote_code, OUT std::map<DWORD, CodeScanReport::t_section_status> &sectionToResult, OUT PatchList &patchesList);
 

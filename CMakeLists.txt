@@ -105,6 +105,7 @@ set (scanners_srcs
 	scanners/mempage_data.cpp
 	scanners/patch_list.cpp
 	scanners/patch_analyzer.cpp
+	scanners/injection_classifier.cpp
 	scanners/scan_report.cpp
 	scanners/scanned_modules.cpp
 	scanners/hook_targets_resolver.cpp
@@ -129,6 +130,7 @@ set (scanners_hdrs
 	scanners/pe_section.h
 	scanners/patch_list.h
 	scanners/patch_analyzer.h
+	scanners/injection_classifier.h
 	scanners/scanned_modules.h
 	scanners/hook_targets_resolver.h
 	scanners/thread_scanner.h
@@ -366,4 +368,16 @@ if (NOT PESIEVE_IS_STATIC)
 		add_test (TestRuns ${CMAKE_INSTALL_PREFIX}/pe-sieve -?)
 		set_tests_properties(TestRuns PROPERTIES PASS_REGULAR_EXPRESSION "Version:")
 	endif()
+endif()
+
+if(PESIEVE_BUILD_TESTING)
+	enable_testing()
+	add_executable(injection_classifier_test
+		tests/injection_classifier_test.cpp
+		scanners/injection_classifier.cpp
+	)
+	target_include_directories(injection_classifier_test PRIVATE
+		${PROJECT_SOURCE_DIR}/scanners
+	)
+	add_test(NAME InjectionClassifierRegression COMMAND injection_classifier_test)
 endif()
